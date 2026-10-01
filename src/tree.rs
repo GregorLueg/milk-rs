@@ -192,7 +192,7 @@ pub fn milk_tree<T: MilkFloat>(
             metric,
             percentile,
             Some(level_params),
-            false,
+            verbose,
         )?;
         if res.reps.len() == cells.len() {
             return Err(MilkErrors::NoProgress {

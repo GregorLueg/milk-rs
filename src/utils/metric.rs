@@ -196,6 +196,83 @@ impl<'a, T: MilkFloat> Prepared<'a, T> {
         s <= r.score_hi && self.score_to_dist(s) <= r.dist
     }
 
+    /// Squared norm of a prepared row, the norm term of the GEMM expansion.
+    ///
+    /// ### Params
+    ///
+    /// * `row` - Prepared row
+    ///
+    /// ### Returns
+    ///
+    /// `|row|^2`.
+    #[inline(always)]
+    pub(crate) fn sq_norm(&self, row: &[T]) -> T {
+        T::dot_simd(row, row)
+    }
+
+    /// Representative term folded into the GEMM as an extra column.
+    ///
+    /// With `1` appended to each query row and this value to each
+    /// representative row, the GEMM returns `h = x.r - |r|^2 / 2` (Euclidean)
+    /// or `h = x.r` (cosine, correlation), and the approximate score is
+    /// `|x|^2 - 2h` or `1 - h`: one value per pair, no per-representative
+    /// lookup in the scan.
+    ///
+    /// ### Params
+    ///
+    /// * `rn` - Squared norm of the representative row
+    ///
+    /// ### Returns
+    ///
+    /// The extra column value.
+    #[inline(always)]
+    pub(crate) fn gemm_rep_column(&self, rn: T) -> T {
+        match self.metric {
+            MilkDist::Euclidean => -(rn / (T::one() + T::one())),
+            MilkDist::Cosine | MilkDist::Correlation => T::zero(),
+        }
+    }
+
+    /// Smallest GEMM value `h` whose pair could still have an exact score at
+    /// most `cap`.
+    ///
+    /// `err` bounds the gap between the approximate and the exact score, so a
+    /// pair below the threshold is certainly worse than `cap`; pairs at or
+    /// above it are rescored exactly.
+    ///
+    /// ### Params
+    ///
+    /// * `xn` - Squared norm of the query row
+    /// * `cap` - Score to beat or match: the radius, or the incumbent's
+    ///   exact score once there is one
+    /// * `err` - Bound on `|approximate score - exact score|`
+    ///
+    /// ### Returns
+    ///
+    /// The threshold on `h`.
+    #[inline(always)]
+    pub(crate) fn gemm_threshold(&self, xn: T, cap: T, err: T) -> T {
+        match self.metric {
+            MilkDist::Euclidean => (xn - err - cap) / (T::one() + T::one()),
+            MilkDist::Cosine | MilkDist::Correlation => T::one() - err - cap,
+        }
+    }
+
+    /// Score cap of the radius, the starting `cap` of
+    /// [`Prepared::gemm_threshold`].
+    ///
+    /// ### Params
+    ///
+    /// * `tau` - Radius
+    ///
+    /// ### Returns
+    ///
+    /// The prefilter bound in score units.
+    #[inline(always)]
+    pub(crate) fn radius_cap(&self, tau: &Radius<T>) -> T {
+        tau.score_hi
+    }
+
     /// Convert a distance into score units.
     ///
     /// ### Params

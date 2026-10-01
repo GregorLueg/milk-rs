@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use crate::errors::MilkErrors;
 use crate::level::medoid::refine_representatives;
-use crate::level::sweep::{SWEEP_BLOCK, sweep};
+use crate::level::sweep::{GEMM_MIN_REPS, SWEEP_BLOCK, sweep};
 use crate::level::threshold::estimate_threshold;
 use crate::utils::metric::{MilkDist, Prepared};
 use crate::utils::traits::MilkFloat;
@@ -147,7 +147,7 @@ pub fn milk_level<T: MilkFloat>(
     let t_threshold = start.elapsed();
 
     let start = Instant::now();
-    let first = sweep(&prep, n, &tau, &[], SWEEP_BLOCK);
+    let first = sweep(&prep, n, &tau, &[], SWEEP_BLOCK, GEMM_MIN_REPS);
     let t_pass1 = start.elapsed();
 
     let start = Instant::now();
@@ -155,7 +155,7 @@ pub fn milk_level<T: MilkFloat>(
     let t_medoid = start.elapsed();
 
     let start = Instant::now();
-    let second = sweep(&prep, n, &tau, &medoids, SWEEP_BLOCK);
+    let second = sweep(&prep, n, &tau, &medoids, SWEEP_BLOCK, GEMM_MIN_REPS);
     let t_pass2 = start.elapsed();
 
     if verbose {
