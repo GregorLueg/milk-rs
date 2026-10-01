@@ -1,0 +1,33 @@
+[package]
+name = "milk-rs"
+version = "0.1.0"
+edition = "2024"
+authors = ["Gregor Lueg <gregorlueg@me.com>"]
+license = "MIT"
+repository = "https://github.com/GregorLueg/milk-rs"
+description = "Rust port of MILK, recursive greedy radius-cover clustering into a tree"
+keywords = ["clustering", "single-cell", "hierarchical", "tree"]
+categories = ["algorithms", "science", "mathematics"]
+
+[lib]
+name = "milk_rs"
+path = "src/lib.rs"
+
+[dependencies]
+ann-search-rs = { version = "0.9.2", default-features = false }
+num-traits = "0.2.19"
+rand = "0.9.2"
+rayon = "1.11.0"
+thiserror = "2.0.18"
+
+[dev-dependencies]
+approx = "0.5.1"
+rand_distr = "0.5.1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+
+[profile.test]
+opt-level = 2
