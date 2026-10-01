@@ -13,6 +13,12 @@ use std::cmp::Ordering;
 use crate::utils::metric::Prepared;
 use crate::utils::traits::MilkFloat;
 
+/// Sampled pairs per independently seeded chunk.
+const SAMPLE_CHUNK: usize = 16_384;
+
+/// Odd 64-bit constant (golden ratio) spreading chunk indices over seeds.
+const SEED_MIX: u64 = 0x9E37_79B9_7F4A_7C15;
+
 /// Estimate the radius as a percentile of pairwise distances.
 ///
 /// Falls back to exact enumeration when the number of distinct pairs does not
@@ -39,23 +45,24 @@ pub(crate) fn estimate_threshold<T: MilkFloat>(
     let total = n * (n - 1) / 2;
     let mut dists: Vec<T> = match n_pairs {
         Some(k) if k < total => {
-            let mut rng = StdRng::seed_from_u64(seed);
-            let pairs: Vec<(u32, u32)> = (0..k)
-                .map(|_| {
-                    let i = rng.random_range(0..n);
-                    let mut j = rng.random_range(0..n - 1);
-                    if j >= i {
-                        j += 1;
+            // Each chunk draws from its own seeded stream, so the sample is
+            // the same at any thread count.
+            let mut dists = vec![T::zero(); k];
+            dists
+                .par_chunks_mut(SAMPLE_CHUNK)
+                .enumerate()
+                .for_each(|(c, out)| {
+                    let mut rng = StdRng::seed_from_u64(seed ^ (c as u64).wrapping_mul(SEED_MIX));
+                    for d in out {
+                        let i = rng.random_range(0..n);
+                        let mut j = rng.random_range(0..n - 1);
+                        if j >= i {
+                            j += 1;
+                        }
+                        *d = prep.score_to_dist(prep.score(prep.row(i), prep.row(j)));
                     }
-                    (i as u32, j as u32)
-                })
-                .collect();
-            pairs
-                .par_iter()
-                .map(|&(i, j)| {
-                    prep.score_to_dist(prep.score(prep.row(i as usize), prep.row(j as usize)))
-                })
-                .collect()
+                });
+            dists
         }
         _ => (0..n - 1)
             .into_par_iter()
