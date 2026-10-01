@@ -17,6 +17,7 @@
 pub mod errors;
 pub mod level;
 pub mod prelude;
+pub mod tree;
 pub mod utils;
 
 /// Crate version, so a dependent can report the numerics version it built

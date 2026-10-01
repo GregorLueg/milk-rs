@@ -159,6 +159,43 @@ impl<'a, T: MilkFloat> Prepared<'a, T> {
         }
     }
 
+    /// Build a radius from a distance.
+    ///
+    /// The exact test is on distances, as in the reference: comparing squared
+    /// scores against `tau^2` alone can drop the very pair that defines `tau`,
+    /// because `sqrt(s)^2 != s` in floating point.
+    ///
+    /// ### Params
+    ///
+    /// * `dist` - Radius as a distance
+    ///
+    /// ### Returns
+    ///
+    /// The radius.
+    pub(crate) fn radius(&self, dist: T) -> Radius<T> {
+        let slack = T::one()
+            + T::epsilon() * T::from_f64(RADIUS_SLACK_EPS).expect("f64 to float cannot fail");
+        Radius {
+            dist,
+            score_hi: self.dist_to_score(dist) * slack,
+        }
+    }
+
+    /// Whether a score lies within a radius.
+    ///
+    /// ### Params
+    ///
+    /// * `s` - Score
+    /// * `r` - Radius
+    ///
+    /// ### Returns
+    ///
+    /// `true` if the distance behind `s` is at most the radius.
+    #[inline(always)]
+    pub(crate) fn within(&self, s: T, r: &Radius<T>) -> bool {
+        s <= r.score_hi && self.score_to_dist(s) <= r.dist
+    }
+
     /// Convert a distance into score units.
     ///
     /// ### Params
@@ -193,6 +230,20 @@ impl<'a, T: MilkFloat> Prepared<'a, T> {
         }
     }
 }
+
+/// A radius in distance units plus a score-space bound for a cheap prefilter.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Radius<T> {
+    /// Radius as a distance; the exact test
+    dist: T,
+    /// Score that every within-radius score is below, with slack for the
+    /// rounding of squaring
+    score_hi: T,
+}
+
+/// Relative slack, in machine epsilons, on the squared radius used by the
+/// prefilter. Squaring and `sqrt` each round once, so a few ulps suffice.
+const RADIUS_SLACK_EPS: f64 = 8.0;
 
 /// Transform a raw row in place into the form the metric's score expects.
 ///

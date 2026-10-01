@@ -11,7 +11,7 @@
 
 use rayon::prelude::*;
 
-use crate::utils::metric::Prepared;
+use crate::utils::metric::{Prepared, Radius};
 use crate::utils::traits::MilkFloat;
 
 /// Sentinel for "no representative within the radius".
@@ -41,7 +41,7 @@ pub(crate) struct SweepResult {
 ///
 /// * `prep` - Prepared data
 /// * `n` - Number of objects
-/// * `tau` - Radius in score units
+/// * `tau` - Radius
 /// * `initial` - Pinned representatives, in group order; skipped by the sweep
 /// * `block` - Objects per block, at least 1
 ///
@@ -51,7 +51,7 @@ pub(crate) struct SweepResult {
 pub(crate) fn sweep<T: MilkFloat>(
     prep: &Prepared<T>,
     n: usize,
-    tau: T,
+    tau: &Radius<T>,
     initial: &[u32],
     block: usize,
 ) -> SweepResult {
@@ -115,7 +115,7 @@ pub(crate) fn sweep<T: MilkFloat>(
 /// * `rep_data` - Contiguous representative rows
 /// * `start` - First representative to scan
 /// * `end` - One past the last representative to scan
-/// * `tau` - Radius in score units
+/// * `tau` - Radius
 /// * `best` - Incumbent `(group, score)`; kept on ties
 ///
 /// ### Returns
@@ -128,7 +128,7 @@ fn nearest<T: MilkFloat>(
     rep_data: &[T],
     start: usize,
     end: usize,
-    tau: T,
+    tau: &Radius<T>,
     best: (u32, T),
 ) -> (u32, T) {
     let dim = prep.dim();
@@ -138,7 +138,7 @@ fn nearest<T: MilkFloat>(
     while g + 4 <= end {
         let s = prep.score_batch_4(q, [row(g), row(g + 1), row(g + 2), row(g + 3)]);
         for (k, &sk) in s.iter().enumerate() {
-            if sk <= tau && sk < bs {
+            if sk < bs && prep.within(sk, tau) {
                 bg = (g + k) as u32;
                 bs = sk;
             }
@@ -147,7 +147,7 @@ fn nearest<T: MilkFloat>(
     }
     for g in g..end {
         let s = prep.score(q, row(g));
-        if s <= tau && s < bs {
+        if s < bs && prep.within(s, tau) {
             bg = g as u32;
             bs = s;
         }
@@ -183,7 +183,7 @@ mod tests {
             let (mut bg, mut bs) = (NO_REP, f64::INFINITY);
             for (g, &r) in reps.iter().enumerate() {
                 let s = prep.score(prep.row(i), prep.row(r as usize));
-                if s <= tau && s < bs {
+                if prep.score_to_dist(s) <= tau && s < bs {
                     bg = g as u32;
                     bs = s;
                 }
@@ -209,7 +209,7 @@ mod tests {
         let data = random_data(n, dim, 3);
         for metric in [MilkDist::Euclidean, MilkDist::Cosine, MilkDist::Correlation] {
             let prep = Prepared::new(&data, dim, metric);
-            let tau = prep.dist_to_score(estimate_threshold(&prep, n, 2.0, None, 0));
+            let tau = estimate_threshold(&prep, n, 2.0, None, 0);
             let truth = naive_sweep(&prep, n, tau, &[]);
             assert!(
                 truth.reps.len() > 10 && truth.reps.len() < n,
@@ -217,7 +217,7 @@ mod tests {
                 truth.reps.len()
             );
             for block in [1, 3, 64, SWEEP_BLOCK, 10 * n] {
-                let got = sweep(&prep, n, tau, &[], block);
+                let got = sweep(&prep, n, &prep.radius(tau), &[], block);
                 assert_eq!(got.reps, truth.reps, "{metric:?} block {block}");
                 assert_eq!(got.assignment, truth.assignment, "{metric:?} block {block}");
             }
@@ -229,10 +229,10 @@ mod tests {
         let (n, dim) = (500, 4);
         let data = random_data(n, dim, 5);
         let prep = Prepared::new(&data, dim, MilkDist::Euclidean);
-        let tau = prep.dist_to_score(0.4);
+        let tau = 0.4;
         let initial = [17u32, 3, 250, 499];
         let truth = naive_sweep(&prep, n, tau, &initial);
-        let got = sweep(&prep, n, tau, &initial, 32);
+        let got = sweep(&prep, n, &prep.radius(tau), &initial, 32);
         assert_eq!(&got.reps[..4], &initial);
         assert_eq!(got.reps, truth.reps);
         assert_eq!(got.assignment, truth.assignment);
@@ -242,7 +242,7 @@ mod tests {
     fn test_sweep_identical_rows_single_group() {
         let data = vec![1.5f64; 50 * 3];
         let prep = Prepared::new(&data, 3, MilkDist::Euclidean);
-        let got = sweep(&prep, 50, 0.0, &[], 8);
+        let got = sweep(&prep, 50, &prep.radius(0.0), &[], 8);
         assert_eq!(got.reps, vec![0]);
         assert!(got.assignment.iter().all(|&g| g == 0));
     }

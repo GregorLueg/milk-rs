@@ -30,6 +30,18 @@ pub enum MilkErrors {
         reason: String,
     },
 
+    // -- recursion --
+    /// A level produced as many groups as it had objects
+    #[error(
+        "Level {level} merged none of its {n} objects; the radius is below every pairwise distance."
+    )]
+    NoProgress {
+        /// Zero-based level index
+        level: usize,
+        /// Objects at that level
+        n: usize,
+    },
+
     // -- metrics --
     /// The requested distance metric is not implemented
     #[error("Distance metric '{0}' is not supported. Use euclidean, cosine or correlation.")]

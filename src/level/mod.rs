@@ -64,7 +64,8 @@ impl Default for LevelParams {
 pub struct LevelResult<T> {
     /// Radius used, as a distance
     pub threshold: T,
-    /// Object index of each group's representative, in group order
+    /// Object index of each group's representative, ascending; group `g` is
+    /// the group whose representative is `reps[g]`
     pub reps: Vec<u32>,
     /// Group of each object; the parent-pointer array for this level
     pub assignment: Vec<u32>,
@@ -142,11 +143,11 @@ pub fn milk_level<T: MilkFloat>(
 
     let start = Instant::now();
     let threshold = estimate_threshold(&prep, n, percentile, params.n_pairs, params.seed);
-    let tau = prep.dist_to_score(threshold);
+    let tau = prep.radius(threshold);
     let t_threshold = start.elapsed();
 
     let start = Instant::now();
-    let first = sweep(&prep, n, tau, &[], SWEEP_BLOCK);
+    let first = sweep(&prep, n, &tau, &[], SWEEP_BLOCK);
     let t_pass1 = start.elapsed();
 
     let start = Instant::now();
@@ -154,7 +155,7 @@ pub fn milk_level<T: MilkFloat>(
     let t_medoid = start.elapsed();
 
     let start = Instant::now();
-    let second = sweep(&prep, n, tau, &medoids, SWEEP_BLOCK);
+    let second = sweep(&prep, n, &tau, &medoids, SWEEP_BLOCK);
     let t_pass2 = start.elapsed();
 
     if verbose {
@@ -170,10 +171,28 @@ pub fn milk_level<T: MilkFloat>(
         );
     }
 
+    // Number groups by their representative's input position, so the next
+    // level sweeps in input order. Creation order is not input order (medoids
+    // move, new reps append) and measurably changes how fast the tree
+    // compresses.
+    let mut reps = second.reps;
+    let mut rank = vec![0u32; reps.len()];
+    let mut by_pos: Vec<u32> = (0..reps.len() as u32).collect();
+    by_pos.sort_unstable_by_key(|&g| reps[g as usize]);
+    for (new, &old) in by_pos.iter().enumerate() {
+        rank[old as usize] = new as u32;
+    }
+    reps.sort_unstable();
+    let assignment = second
+        .assignment
+        .iter()
+        .map(|&g| rank[g as usize])
+        .collect();
+
     Ok(LevelResult {
         threshold,
-        reps: second.reps,
-        assignment: second.assignment,
+        reps,
+        assignment,
         n_groups_pass1: first.reps.len(),
     })
 }
@@ -232,6 +251,7 @@ mod tests {
         let data: Vec<f32> = (0..n * dim).map(|_| rng.random::<f32>()).collect();
         let res = milk_level(&data, n, dim, MilkDist::Euclidean, 1.0, None, false).unwrap();
         assert!(res.reps.len() > 1 && res.reps.len() < n);
+        assert!(res.reps.windows(2).all(|w| w[0] < w[1]));
         for (g, &r) in res.reps.iter().enumerate() {
             assert_eq!(res.assignment[r as usize], g as u32);
         }
