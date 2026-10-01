@@ -34,6 +34,12 @@ const NO_REP: u32 = u32::MAX;
 /// 16384 lost in pass one to phase two.
 pub(crate) const SWEEP_BLOCK: usize = 2048;
 
+/// Objects per block for the second sweep, where the medoids are pinned and
+/// almost no new representatives appear, so phase two is nearly free and
+/// larger blocks only save fork-joins. 16384 to 1M were flat at 1M x 50 and
+/// about 10% ahead of `SWEEP_BLOCK`.
+pub(crate) const SWEEP_BLOCK_PINNED: usize = 65_536;
+
 /// Minimum objects per rayon task in the scalar phase one, so small G does not
 /// drown in scheduling overhead. Untuned.
 const SWEEP_MIN_PAR_LEN: usize = 16;
@@ -42,12 +48,13 @@ const SWEEP_MIN_PAR_LEN: usize = 16;
 /// Below this the GEMM call overhead outweighs the scalar scan. Untuned.
 pub(crate) const GEMM_MIN_REPS: usize = 256;
 
-/// Block rows per rayon task in the GEMM phase one. 32 to 256 were within
-/// 15% at 200k x 50 on an M1 Max; 32 was the slowest.
-const GEMM_ROWS: usize = 128;
+/// Block rows per rayon task in the GEMM phase one. At 1M x 50 on an M1 Max,
+/// 256 beat 128 by 5% (pass one) and 10% (pass two); multiples of 32 beat
+/// counts chosen to balance tasks over threads, and 512 lost in pass one.
+const GEMM_ROWS: usize = 256;
 
 /// Representatives per GEMM tile. With `GEMM_ROWS` this bounds the per-task
-/// output buffer, `128 x 1024` f32 is 512 KB. 512 to 2048 were within 10%.
+/// output buffer, `256 x 1024` f32 is 1 MB. 512 to 2048 were within 10%.
 const GEMM_TILE: usize = 1024;
 
 /// Rounding slack of the GEMM prefilter, in units of `(dim + 1) * eps *
@@ -436,13 +443,20 @@ mod tests {
             let prep = Prepared::new(&data, dim, metric);
             let tau = estimate_threshold(&prep, n, 0.05, None, 0);
             let truth = naive_sweep(&prep, n, tau, &[]);
-            assert!(truth.reps.len() > 2 * GEMM_TILE, "{} reps", truth.reps.len());
+            assert!(
+                truth.reps.len() > 2 * GEMM_TILE,
+                "{} reps",
+                truth.reps.len()
+            );
             let got = sweep(&prep, n, &prep.radius(tau), &[], 3 * GEMM_ROWS + 5, 0);
             assert_eq!(got.reps, truth.reps, "{metric:?}");
             assert_eq!(got.assignment, truth.assignment, "{metric:?}");
             let pinned = sweep(&prep, n, &prep.radius(tau), &truth.reps[..500], 1000, 0);
             let pinned_truth = naive_sweep(&prep, n, tau, &truth.reps[..500]);
-            assert_eq!(pinned.assignment, pinned_truth.assignment, "{metric:?} pinned");
+            assert_eq!(
+                pinned.assignment, pinned_truth.assignment,
+                "{metric:?} pinned"
+            );
         }
     }
 
