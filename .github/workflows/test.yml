@@ -1,0 +1,23 @@
+name: Test the package
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    uses: GregorLueg/personal-actions/.github/workflows/rust-test.yml@v1
+    with:
+      cpu-args: '--release'
+      # `accelerate` is a no-op off macOS, so this second run only differs on
+      # the macOS runner, where it covers the faer GEMM path.
+      cpu-args-extra: '--release --no-default-features'
+      # No GPU code: an empty string skips the GPU job.
+      gpu-args: ''
+    secrets: inherit
